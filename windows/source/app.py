@@ -56,11 +56,15 @@ def main():
         import daemon
         daemon.run_once()
     elif "--stop-daemon" in sys.argv:
-        # 停止后台守护（供安装/卸载流程调用，无窗口、无副作用）
+        # 停止后台守护。两个入口共用本分支：
+        #   1) 安装/卸载流程直接调用（无窗口、无副作用）
+        #   2) GUI 遇到 SYSTEM 守护（普通权限杀不掉）时，经 run_elevated_and_wait
+        #      以管理员身份重入本分支——结果必须写回固定文件供父进程读取
         import campus_core as core
         ok, msg = core.stop_daemon()
         print(msg)
-        sys.exit(0)
+        core.write_elevated_result(ok, msg)
+        sys.exit(0 if ok else 1)
     else:
         import gui
         gui.main()

@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 
-APP_VERSION = "1.2.0"   # 应用版本号（显示在设置页脚与 exe 文件属性里）
+APP_VERSION = "1.2.1"   # 应用版本号（显示在设置页脚与 exe 文件属性里）
 APP_NAME = "校园网自动登录"
 
 # 数据目录：源码运行时 = 本文件所在目录；
@@ -371,6 +371,13 @@ def ensure_campus_wifi(cfg):
 # 状态文件（daemon 写、GUI 读）
 # ----------------------------------------------------------------------
 def write_status(**kw):
+    """更新状态文件（daemon 写、GUI 读）。
+
+    冲突背景：GUI 打开期间每 2 秒 read_status() 一次，而 Windows 下 Python 的
+    open() 不带「删除共享」属性，若恰好撞上 os.replace 替换 status.json 的瞬间，
+    会抛 WinError 5 拒绝访问（杀软瞬时扫描也会造成同样冲突）。
+    处理：短重试吸收瞬时冲突；重试耗尽也不再向上抛异常——状态文件写失败
+    不该弄死守护进程，返回 False 供调用方知悉即可。"""
     status = {}
     if os.path.exists(STATUS_PATH):
         try:
@@ -381,9 +388,21 @@ def write_status(**kw):
     status.update(kw)
     status["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     tmp = STATUS_PATH + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(status, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, STATUS_PATH)
+    for attempt in range(5):
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(status, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, STATUS_PATH)
+            return True
+        except OSError:
+            if attempt < 4:
+                time.sleep(0.2 * (attempt + 1))
+    # 重试耗尽：清掉残留 tmp（避免影响下一轮），放弃本次写入
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
+    return False
 
 
 def read_status():
@@ -416,25 +435,116 @@ def mask_username(u):
 # ----------------------------------------------------------------------
 # 后台守护进程控制（GUI 与 exe 入口共用）
 # ----------------------------------------------------------------------
+# 单实例互斥体名：Global 命名空间跨会话可见 ——「极速启动」的 SYSTEM 守护
+# （session 0）与登录后自启/手动启动的普通用户守护（session 1+）互相可见。
+MUTEX_NAME = "Global\\CampusAutoLoginDaemonMutex"
+
+# stop_daemon 的哨兵返回消息：守护以 SYSTEM 身份运行，普通权限杀不掉，
+# GUI 据此发起 UAC 提权重试（app.py --stop-daemon）。
+STOP_NEED_ELEVATION = "需要管理员权限"
+
+
+def try_lock_daemon():
+    """尝试持有守护单实例互斥体。
+
+    返回值：
+      - 内核句柄（int）→ 持有成功，调用方需在进程存活期间保持引用
+        （句柄被 GC 关闭会提前放锁；进程退出时内核自动释放，崩溃也不残留死锁）
+      - None → 已有守护在运行（互斥体已存在，或被另一权限级实例创建后拒绝访问）
+      - False → 互斥体机制本身不可用（极罕见），调用方应回退 pid 校验兜底
+
+    为什么优先于 pid 文件：内核互斥体的创建/检测是原子操作，没有 pid 文件的
+    读写竞态；且 Global 命名空间跨会话，SYSTEM 与普通用户的实例互相可见，
+    不会像 OpenProcess 那样在跨权限级时被拒绝访问而误判。
+    """
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        ERROR_ALREADY_EXISTS = 183
+        ERROR_ACCESS_DENIED = 5
+        # 优先 Global（跨会话）；受限环境创建失败时退回 Local（同会话内仍有效）
+        for name in (MUTEX_NAME, "Local\\" + MUTEX_NAME.split("\\", 1)[1]):
+            h = k32.CreateMutexW(None, True, name)
+            err = k32.GetLastError()
+            if h:
+                if err == ERROR_ALREADY_EXISTS:
+                    k32.CloseHandle(h)
+                    return None   # 已有实例持有 → 调用方应退出
+                return h          # 新建成功 → 本实例持有，直到进程退出
+            if err == ERROR_ACCESS_DENIED:
+                # 另一权限级的实例已创建同名互斥体且 DACL 不放行 → 视为已在运行
+                return None
+        return False
+    except Exception:
+        return False
+
+
+def daemon_mutex_exists():
+    """跨权限级探测守护互斥体是否已存在（只探测，不创建、不持有）。"""
+    try:
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        SYNCHRONIZE = 0x00100000
+        h = k32.OpenMutexW(SYNCHRONIZE, False, MUTEX_NAME)
+        if h:
+            k32.CloseHandle(h)
+            return True
+        # 拒绝访问(5) = 互斥体存在但当前权限打不开（SYSTEM 守护 + 普通用户探测）
+        return k32.GetLastError() == 5
+    except Exception:
+        return False
+
+
+def pid_is_our_daemon(pid):
+    """pid 对应的进程是否本程序的守护进程（按 exe 映像名判断）。
+
+    背景：Windows 重启/注销后 pid 文件会残留上一代的 pid，若该 pid 恰好被
+    系统其他进程复用，仅靠"进程是否存在"会误判"已有实例"，让新守护直接退出
+    （表现为重启后后台服务起不来）。因此除进程存在外，还校验其映像名是否为
+    本程序（CampusLogin.exe / 校园网自动登录.exe）。
+
+    关键：打不开 ≠ 不存在 —— OpenProcess 被拒绝访问（错误码 5）说明进程活着，
+    只是当前权限级查不了它（典型：SYSTEM 守护 + 普通用户校验），必须视为
+    「已在运行」；只有进程真的不存在（ERROR_INVALID_PARAMETER=87 等）才返回
+    False。v1.2.0 把"拒绝访问"当成"进程不存在"正是双开事故的根源之一。
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.windll.kernel32
+        # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        h = k32.OpenProcess(0x1000, False, pid)
+        if not h:
+            if k32.GetLastError() == 5:
+                return True   # 进程活着但查不了映像名 → 保守视为本程序守护
+            return False      # 进程不存在 → 残留 pid，新实例可接管
+        try:
+            buf = ctypes.create_unicode_buffer(32768)
+            size = wintypes.DWORD(len(buf))
+            if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                name = os.path.basename(buf.value).lower()
+                return name in ("campuslogin.exe", "校园网自动登录.exe")
+            return True    # 进程存在但取不到路径 → 保守视为"已在运行"
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return True
+
+
 def is_daemon_running():
-    """判断后台守护是否在运行（读 pid 文件 + 校验进程存在）"""
+    """判断后台守护是否在运行。
+
+    优先用全局互斥体（跨会话/跨权限级可靠）；互斥体机制不可用时回退
+    pid 文件 + 映像名校验。"""
+    if daemon_mutex_exists():
+        return True
     if not os.path.exists(PID_PATH):
         return False
     try:
         pid = int(open(PID_PATH).read().strip())
     except Exception:
         return False
-    try:
-        import ctypes
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        k32 = ctypes.windll.kernel32
-        h = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if h:
-            k32.CloseHandle(h)
-            return True
-        return False
-    except Exception:
-        return False
+    return pid_is_our_daemon(pid)
 
 
 def write_pid():
@@ -491,19 +601,56 @@ def start_daemon():
     return False, "启动失败，请查看日志"
 
 
+def _pid_listed(pid):
+    """pid 对应的进程是否真实存活（tasklist 枚举，与任务管理器同一口径）。
+
+    为什么不用 OpenProcess 判断：进程被强杀后，只要有任何残留句柄未关闭，
+    进程对象会继续存在一段时间，OpenProcess 仍会成功——但进程实际已终止
+    （tasklist/任务管理器里都不再出现）。用 OpenProcess 会把"刚杀完"误判成
+    "没杀掉"，导致停止时误报需要提权。tasklist 只列出真正活着的进程。"""
+    import subprocess
+    out = subprocess.run(["tasklist", "/FI", "PID eq %s" % pid, "/FO", "CSV", "/NH"],
+                         capture_output=True, creationflags=0x08000000).stdout
+    for enc in ("gbk", "utf-8"):
+        try:
+            return ('"%s"' % pid) in out.decode(enc, errors="replace")
+        except Exception:
+            continue
+    return False
+
+
 def stop_daemon():
-    """停止后台守护进程。返回 (是否成功, 说明)"""
-    if not os.path.exists(PID_PATH):
+    """停止后台守护进程。返回 (是否成功, 说明)
+
+    跨权限级场景：「极速启动」的守护以 SYSTEM 身份运行，普通用户的 taskkill
+    会被拒绝访问。这里 taskkill 后用 tasklist 确认进程真的终止了，才清理
+    pid 文件——v1.2.0 的旧实现不看 taskkill 结果直接删 pid 文件，导致
+    "守护还活着但状态显示已停止"的失真（且 GUI 会再拉起第二个守护）。
+    若进程仍在（典型为 SYSTEM 守护），返回 (False, STOP_NEED_ELEVATION)，
+    由 GUI 发起 UAC 提权重试（app.py --stop-daemon）。"""
+    pid = daemon_pid()
+    if pid is None:
+        if daemon_mutex_exists():
+            # 守护活着但 pid 文件丢失/损坏（异常残留），无法定位进程
+            return False, "后台服务在运行但无法定位进程，请重启电脑后重试"
         return False, "后台服务未在运行"
-    try:
-        pid = int(open(PID_PATH).read().strip())
-    except Exception:
-        return False, "pid 文件损坏"
+    # pid 必须仍属于本程序的守护：Windows 重启后残留的 pid 若被其他进程复用
+    # （映像名校验不符），绝不能盲杀无辜进程，只需清理残留 pid 文件
+    if not pid_is_our_daemon(pid):
+        remove_pid()
+        return True, "后台服务未在运行（已清理残留记录）"
     import subprocess
     subprocess.run(["taskkill", "/F", "/PID", str(pid)],
                    capture_output=True, creationflags=0x08000000)
-    remove_pid()
-    return True, "已停止 (pid=%s)" % pid
+    # 确认真的终止了（普通用户杀 SYSTEM 进程会被拒绝，进程会继续活着）
+    for _ in range(6):
+        if not _pid_listed(pid):
+            remove_pid()
+            return True, "已停止 (pid=%s)" % pid
+        time.sleep(0.25)
+    # 1.5 秒后进程仍在：taskkill 没有生效（权限不足）。pid 文件保留，
+    # 互斥体仍由守护持有，状态一致；GUI 侧据此发起提权重试。
+    return False, STOP_NEED_ELEVATION
 
 
 def daemon_pid():

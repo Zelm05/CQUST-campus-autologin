@@ -18,7 +18,7 @@ rem ---- 路径（基于本脚本所在目录，可随意移动） ----
 set "BUILDIR=%~dp0"
 set "SRCIR=%BUILDIR%.."
 set "RELDIR=%SRCIR%\..\release"
-set "APPVER=1.2.0"
+set "APPVER=1.2.1"
 
 rem ---- 1) 定位 PyInstaller ----
 where pyinstaller >nul 2>nul

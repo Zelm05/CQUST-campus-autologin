@@ -156,46 +156,27 @@ def attempt_login(cfg, qs, portal_base, reason="掉线"):
 # ----------------------------------------------------------------------
 # 主循环
 # ----------------------------------------------------------------------
-def _pid_is_our_daemon(pid):
-    """pid 对应的进程是否本程序的守护进程（按 exe 映像名判断）。
-
-    背景：开机级/登录级/手动启动可能叠加，单实例保护靠 daemon.pid 记录的 pid。
-    但 Windows 重启/注销后 pid 文件会残留上一代的 pid，若该 pid 恰好被系统其他进程
-    复用，仅靠"进程是否存在"会误判"已有实例"，让新守护直接退出（表现为重启后
-    后台服务起不来）。因此除进程存在外，还校验其映像名是否为本程序
-    （CampusLogin.exe / 校园网自动登录.exe）。
-    """
-    try:
-        import ctypes
-        from ctypes import wintypes
-        k32 = ctypes.windll.kernel32
-        # PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        h = k32.OpenProcess(0x1000, False, pid)
-        if not h:
-            return False   # 进程不存在或无权限访问 → 视为残留 pid，新实例可接管
-        try:
-            buf = ctypes.create_unicode_buffer(32768)
-            size = wintypes.DWORD(len(buf))
-            if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
-                name = os.path.basename(buf.value).lower()
-                return name in ("campuslogin.exe", "校园网自动登录.exe")
-            return True    # 进程存在但取不到路径 → 保守视为"已在运行"
-        finally:
-            k32.CloseHandle(h)
-    except Exception:
-        return True
+_MUTEX_HANDLE = None   # 单实例互斥体句柄：进程存活期间保持引用，退出时内核自动释放
 
 
 def main_loop():
+    global _MUTEX_HANDLE
     setup_logging()
-    # ---- 单实例保护 ----------------------------------------------------
-    # 场景：开机级任务 + 登录级任务 + 用户手动启动，三者可能叠加。
-    # 若不做保护会跑出多个守护进程，同时向门户发登录请求，反而互相把对方踢下线。
-    # 注意：pid 文件里的 pid 必须"确实是本程序在跑"才算已运行——Windows 重启后
-    # daemon.pid 会残留旧 pid，若该 pid 被系统其他进程复用，仅 OpenProcess 判断
-    # "进程存在"会误判已运行，导致新守护自杀、后台服务起不来。
+    # ---- 单实例保护 · 第一道：全局命名互斥体（跨会话/跨权限级） ------------
+    # 场景：开机级任务（SYSTEM, session 0）+ 登录级自启/手动启动（普通用户），
+    # 三者可能叠加。互斥体的创建/检测是原子操作、跨会话可见、随进程退出
+    # 由内核自动释放（崩溃也不残留），是最可靠的判据（详见 core.try_lock_daemon）。
+    lock = core.try_lock_daemon()
+    if lock is None:
+        log.info("[系统] 守护进程已在运行（互斥体已存在），本实例直接退出，避免重复登录")
+        return
+    if lock is not False:
+        _MUTEX_HANDLE = lock   # 互斥体机制不可用时返回 False → 仅由 pid 校验兜底
+    # ---- 单实例保护 · 第二道：pid 文件校验 --------------------------------
+    # 兜底 + 区分"守护在跑"与"pid 残留被复用"：pid 必须确实是本程序在跑才算
+    # 已运行（映像名校验 + 拒绝访问视为存活，见 core.pid_is_our_daemon）。
     running_pid = core.daemon_pid()
-    if running_pid and running_pid != os.getpid() and _pid_is_our_daemon(running_pid):
+    if running_pid and running_pid != os.getpid() and core.pid_is_our_daemon(running_pid):
         log.info("[系统] 守护进程已在运行（pid=%s），本实例直接退出，避免重复登录", running_pid)
         return
     core.write_pid()

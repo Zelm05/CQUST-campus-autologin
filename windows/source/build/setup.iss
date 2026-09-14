@@ -12,7 +12,7 @@
 
 #define MyAppName "校园网自动登录"
 #define MyAppNameEn "CampusAutoLogin"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.2.1"
 #define MyAppPublisher "Zelm"
 #define MyAppCopyright "Copyright (C) 2026 Zelm"
 

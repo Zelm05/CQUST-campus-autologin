@@ -415,6 +415,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": ok, "message": msg})
         elif path == "/api/daemon/stop":
             ok, msg = core.stop_daemon()
+            if not ok and msg == core.STOP_NEED_ELEVATION:
+                # 守护以 SYSTEM 身份运行（「极速启动」开机任务），普通权限杀不掉：
+                # UAC 提权后由管理员子进程执行 --stop-daemon 并把结果写回固定文件
+                launched, code, res = core.run_elevated_and_wait("--stop-daemon")
+                if launched and res and res.get("ok"):
+                    ok, msg = True, res.get("msg", "已停止")
+                elif launched and res:
+                    ok, msg = False, res.get("msg", "停止失败")
+                elif launched:
+                    ok, msg = False, "停止失败（提权子进程退出码 %s）" % code
+                else:
+                    ok, msg = False, "已取消 UAC 授权，后台服务未停止"
             # 停止后台服务的同时，关闭"登录后自动运行"（删除登录级自启任务）
             a_ok, a_msg = core.set_autostart(False)
             tip = "，已关闭登录后自动运行" if a_ok else ("，关闭登录自启失败：%s" % (a_msg or "未知"))
