@@ -43,3 +43,5 @@ windows/*.zip
 
 # 本地构建工具链（Android SDK / Gradle / venv，体积大，不入库）
 tools/
+
+build_apk.log
