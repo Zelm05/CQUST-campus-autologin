@@ -103,7 +103,7 @@
 
 ## 开源与联系
 
-- 开源地址：https://github.com/Zelm05/campus-autologin
+- 开源地址：https://github.com/Zelm05/CQUST-campus-autologin
 - 联系邮箱：yz050930@gmail.com
 
 问题反馈、Bug 提交、功能建议，欢迎通过邮箱联系；也可在 GitHub 上提 Issue / PR。

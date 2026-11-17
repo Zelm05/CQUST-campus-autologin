@@ -4,12 +4,12 @@
 
 > An auto-relogin campus network authenticator for Windows & Android, built for the Ruijie ePortal gateway (e.g. CQUST).
 
-- Repository: <https://github.com/Zelm05/campus-autologin>
+- Repository: <https://github.com/Zelm05/CQUST-campus-autologin>
 - Contact: yz050930@gmail.com
 
 ## Download
 
-Installers are published on the [**Releases page**](https://github.com/Zelm05/campus-autologin/releases/latest):
+Installers are published on the [**Releases page**](https://github.com/Zelm05/CQUST-campus-autologin/releases/latest):
 
 | Platform | File | Notes |
 | --- | --- | --- |

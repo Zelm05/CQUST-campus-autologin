@@ -763,7 +763,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
     <div class="hdr-right">
       <div class="ver" id="ver">v--</div>
       <div class="hdr-links">
-        <a href="https://github.com/Zelm05/campus-autologin" target="_blank" rel="noopener">GitHub 开源</a>
+        <a href="https://github.com/Zelm05/CQUST-campus-autologin" target="_blank" rel="noopener">GitHub 开源</a>
         <span class="sep" style="color:var(--line2)">|</span>
         <a href="mailto:yz050930@gmail.com">yz050930@gmail.com</a>
       </div>

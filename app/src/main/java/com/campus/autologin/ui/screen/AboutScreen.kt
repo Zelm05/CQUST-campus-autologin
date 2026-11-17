@@ -42,7 +42,7 @@ import androidx.navigation.NavController
 import com.campus.autologin.BuildConfig
 import com.campus.autologin.R
 
-private const val GITHUB_URL = "https://github.com/Zelm05/campus-autologin"
+private const val GITHUB_URL = "https://github.com/Zelm05/CQUST-campus-autologin"
 private const val DEVELOPER_EMAIL = "yz050930@gmail.com"
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -5,12 +5,12 @@
 > 掉线自动重连的校园网认证工具，支持 Windows 桌面端与 Android 移动端。
 > Auto-relogin campus network authenticator for Windows & Android, built for the Ruijie ePortal gateway (e.g. CQUST).
 
-- 仓库：<https://github.com/Zelm05/campus-autologin>
+- 仓库：<https://github.com/Zelm05/CQUST-campus-autologin>
 - 联系：yz050930@gmail.com
 
 ## 下载 Download
 
-安装包统一发布在 [**Releases 页面**](https://github.com/Zelm05/campus-autologin/releases/latest)，下载后直接安装：
+安装包统一发布在 [**Releases 页面**](https://github.com/Zelm05/CQUST-campus-autologin/releases/latest)，下载后直接安装：
 
 | 平台 | 文件 | 说明 |
 | --- | --- | --- |

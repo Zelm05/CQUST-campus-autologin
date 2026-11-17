@@ -5,8 +5,8 @@
 #
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 2, 1, 0),
-    prodvers=(1, 2, 1, 0),
+    filevers=(1, 2, 2, 0),
+    prodvers=(1, 2, 2, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -27,7 +27,7 @@ VSVersionInfo(
             StringStruct(u'OriginalFilename', u'校园网自动登录.exe'),
             StringStruct(u'ProductName', u'校园网自动登录'),
             StringStruct(u'ProductVersion', u'1.2.2.0'),
-            StringStruct(u'LegalCopyright', u'Copyright (C) 2026 Zelm · MIT License · https://github.com/Zelm05/campus-autologin'),
+            StringStruct(u'LegalCopyright', u'Copyright (C) 2026 Zelm · MIT License · https://github.com/Zelm05/CQUST-campus-autologin'),
           ]
         )
       ]
