@@ -1,6 +1,6 @@
 ; ============================================================
 ; 校园网自动登录 v1.2.2 安装脚本
-; 默认安装到 D:\校园网自动登录，用户可在安装向导自由更改
+; 默认安装到 D:\CampusAutoLogin，用户可在安装向导自由更改
 ; 编译：D:\inno\ISCC.exe build\setup.iss
 ;
 ; 行为说明：
@@ -23,7 +23,7 @@ AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppCopyright={#MyAppCopyright}
-DefaultDirName=D:\校园网自动登录
+DefaultDirName=D:\{#MyAppNameEn}
 ; 不再创建开始菜单程序组，也不显示“开始菜单文件夹”选择页
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
@@ -65,7 +65,7 @@ begin
     begin
       MsgBox('提示：默认安装盘符（' + ExtractFileDrive(ExpandConstant('{app}')) +
              '）在您的电脑上不可用。' + #13#10 +
-             '请在下一步选择其他盘符（推荐 D:\校园网自动登录 或 C:\校园网自动登录）。',
+             '请在下一步选择其他盘符（推荐 D:\CampusAutoLogin 或 C:\CampusAutoLogin）。',
              mbInformation, MB_OK);
     end;
   end;
