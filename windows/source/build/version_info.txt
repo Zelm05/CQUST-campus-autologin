@@ -22,11 +22,11 @@ VSVersionInfo(
           [
             StringStruct(u'CompanyName', u'Zelm'),
             StringStruct(u'FileDescription', u'校园网掉线自动重连工具'),
-            StringStruct(u'FileVersion', u'1.2.1.0'),
+            StringStruct(u'FileVersion', u'1.2.2.0'),
             StringStruct(u'InternalName', u'CampusAutoLogin'),
             StringStruct(u'OriginalFilename', u'校园网自动登录.exe'),
             StringStruct(u'ProductName', u'校园网自动登录'),
-            StringStruct(u'ProductVersion', u'1.2.1.0'),
+            StringStruct(u'ProductVersion', u'1.2.2.0'),
             StringStruct(u'LegalCopyright', u'Copyright (C) 2026 Zelm · MIT License · https://github.com/Zelm05/campus-autologin'),
           ]
         )

@@ -1,5 +1,5 @@
 ; ============================================================
-; 校园网自动登录 v1.2.0 安装脚本
+; 校园网自动登录 v1.2.2 安装脚本
 ; 默认安装到 D:\校园网自动登录，用户可在安装向导自由更改
 ; 编译：D:\inno\ISCC.exe build\setup.iss
 ;
@@ -12,7 +12,7 @@
 
 #define MyAppName "校园网自动登录"
 #define MyAppNameEn "CampusAutoLogin"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.2.2"
 #define MyAppPublisher "Zelm"
 #define MyAppCopyright "Copyright (C) 2026 Zelm"
 

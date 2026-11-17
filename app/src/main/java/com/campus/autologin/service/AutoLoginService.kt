@@ -47,6 +47,7 @@ class AutoLoginService : android.app.Service() {
     private var loginJob: Job? = null
     private var periodicJob: Job? = null
     @Volatile private var lastValidated: Boolean = false
+    private var foregroundStarted = false
 
     override fun onCreate() {
         super.onCreate()
@@ -73,9 +74,9 @@ class AutoLoginService : android.app.Service() {
             }
             return START_STICKY
         }
-        if (repo.loadConfig().alwaysRunInBackground) {
-            startForegroundSafe()
-        }
+        // 只要服务活着就必须在前台：foregroundServiceType=dataSync 的服务
+        // 一旦不在前台，系统随时可以回收，用户也就看不到「监控中」。
+        startForegroundSafe()
         return START_STICKY
     }
 
@@ -86,6 +87,8 @@ class AutoLoginService : android.app.Service() {
      *         为由杀掉整个进程——这正是"开了自启动却还是掉后台"的典型表现。
      */
     private fun startForegroundSafe(): Boolean {
+        // onCreate 与 onStartCommand 都会调到这里，重复 startForeground 会重刷通知
+        if (foregroundStarted) return true
         val notification = buildNotification()
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -98,6 +101,7 @@ class AutoLoginService : android.app.Service() {
                 startForeground(NOTIF_ID, notification)
             }
             lastStartError = null
+            foregroundStarted = true
             true
         } catch (t: Throwable) {
             lastStartError = ErrorText.of(t)
@@ -242,14 +246,15 @@ class AutoLoginService : android.app.Service() {
             }
         }
         callback = null
-        // 不是用户主动关闭（配置仍要求常驻）→ 安排一次快速复活
-        if (shouldRun()) MonitorWorker.scheduleRevive(this, delayMinutes = 1)
+        // 用户主动关闭监控时不许复活；被系统杀掉（userStopped=false）时行为不变
+        if (!userStopped && shouldRun()) MonitorWorker.scheduleRevive(this, delayMinutes = 1)
         super.onDestroy()
     }
 
+    /** 服务被杀后是否该安排复活：与「后台监控总开关」保持同一套判定，此处不是开机入口。 */
     private fun shouldRun(): Boolean {
         val cfg = runCatching { repo.loadConfig() }.getOrNull() ?: return false
-        return cfg.autoLogin || cfg.alwaysRunInBackground
+        return KeepAlive.shouldRun(cfg, booting = false)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -269,6 +274,15 @@ class AutoLoginService : android.app.Service() {
         private const val ACTION_REFRESH = "com.campus.autologin.action.REFRESH_NOTIF"
         private const val PERIODIC_CHECK_MS = 60_000L  // 每 60 秒兜底探一次
 
+        /**
+         * 用户是否主动关闭了监控。
+         *
+         * 只在 [stop] 里置 true、[start] 里清除；进程被系统杀掉时静态变量随之丢失
+         * （回到默认 false），所以「被杀→复活」的老行为不受影响。
+         */
+        @Volatile
+        private var userStopped = false
+
         /** 服务是否正在运行（进程内标志，供 WorkManager 判断要不要拉起）。 */
         @Volatile
         var isRunning: Boolean = false
@@ -284,6 +298,7 @@ class AutoLoginService : android.app.Service() {
             private set
 
         fun start(ctx: Context) {
+            userStopped = false
             runCatching {
                 ContextCompat.startForegroundService(
                     ctx.applicationContext,
@@ -293,6 +308,8 @@ class AutoLoginService : android.app.Service() {
         }
 
         fun stop(ctx: Context) {
+            // 先置位再 stopService：onDestroy 在同进程内同步读取这个标志
+            userStopped = true
             val app = ctx.applicationContext
             MonitorWorker.disable(app)
             runCatching {

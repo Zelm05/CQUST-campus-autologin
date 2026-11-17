@@ -17,7 +17,6 @@ object CampusConfig {
     const val LOGIN_PATH = "/eportal/InterFace.do?method=login"
     const val LOGOUT_PATH = "/eportal/InterFace.do?method=logout"
     const val ONLINE_INFO_PATH = "/eportal/InterFace.do?method=getOnlineUserInfo"
-    const val KEEPALIVE_PATH = "/eportal/InterFace.do?method=keepalive"
 
     // 登录表单字段名（与 AuthInterFace.login 一致）
     const val USER_FIELD = "userId"

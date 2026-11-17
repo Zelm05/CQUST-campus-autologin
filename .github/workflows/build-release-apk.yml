@@ -60,6 +60,15 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk \
              "app/build/outputs/apk/release/Autologin-${{ github.ref_name }}_release.apk"
 
+      # release/*.exe 被 .gitignore 排除（安装包不进版本库），干净 checkout 里必然不存在；
+      # 因此不再写死某个版本号，只在有人手动把安装包放进 release/ 时顺带收进 Release。
+      - name: Collect prebuilt Windows installers
+        run: |
+          mkdir -p dist
+          shopt -s nullglob
+          for f in release/*_setup.exe; do cp "$f" dist/; done
+          ls -l dist || true
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
@@ -67,7 +76,9 @@ jobs:
           # APK 文件名带版本号（Autologin-v1.0.3_release.apk），避免下载时分不清版本
           files: |
             app/build/outputs/apk/release/Autologin-${{ github.ref_name }}_release.apk
-            release/Autologin_v1.1.0_x64_setup.exe
+            dist/*.exe
+          # 没有预置 Windows 安装包时，不要让上面那行 glob 匹配不到就判失败
+          fail_on_unmatched_files: false
           # Release 描述直接展示 CHANGELOG（含版本号与变更说明）
           body_path: CHANGELOG.md
         env:

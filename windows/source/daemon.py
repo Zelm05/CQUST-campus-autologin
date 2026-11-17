@@ -15,6 +15,7 @@ daemon.py —— 后台守护进程（无任何窗口/弹窗）
 """
 
 import logging
+import logging.handlers
 import os
 import sys
 import threading
@@ -28,14 +29,40 @@ import campus_core as core  # noqa: E402
 # ----------------------------------------------------------------------
 # 日志
 # ----------------------------------------------------------------------
+# 单个日志文件上限与保留份数：按天分文件 + 单文件滚动，避免异常时会刷出几百 MB 的日志
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
+
+
+def _make_handler(logfile):
+    """构造日志 handler：优先滚动，失败退回普通 FileHandler。
+
+    必须兜底的原因：RotatingFileHandler 在滚动时要把旧文件改名为 .1，
+    若该文件正被其他进程（用户用记事本打开、杀软扫描）占用，Windows 会抛
+    PermissionError；守护进程绝不能因为日志问题起不来。
+    """
+    try:
+        return logging.handlers.RotatingFileHandler(
+            logfile, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT,
+            encoding="utf-8",
+        )
+    except Exception:
+        return logging.FileHandler(logfile, encoding="utf-8")
+
+
 def setup_logging():
+    """只在守护进程启动时调用一次（main_loop / run_once 开头）。
+
+    调用时机固定为启动一次，意味着按天文件名的「今天」在跨零点后不会变
+    ——这是既有行为（GUI 侧 _latest_daemon_log 已按实际文件兜底），此处不改。
+    """
     os.makedirs(core.LOG_DIR, exist_ok=True)
     logfile = os.path.join(core.LOG_DIR, "daemon-%s.log" % datetime.now().strftime("%Y-%m-%d"))
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[logging.FileHandler(logfile, encoding="utf-8")],
+        handlers=[_make_handler(logfile)],
     )
     # 清理 30 天前的旧日志
     try:
@@ -224,16 +251,25 @@ def main_loop():
             if r.online:
                 if last_state != "online":
                     log.info("[网络] 已联网（%s），无需登录", r.detail)
+                    heartbeat_at = now          # 心跳从现在开始计时，否则转在线后下一轮立刻打心跳
                 elif now - heartbeat_at > 3600:
                     log.debug("[网络] 在线心跳（每小时一条，仅确认进程存活）")
                     heartbeat_at = now
                 core.write_status(state="已联网")
                 last_state = "online"
             elif not r.query_string:
-                # 连门户参数都拿不到：多半是 WiFi 断开/信号问题
-                if last_state != "unreachable":
-                    log.info("[网络] 无法联网且未捕获到门户跳转（%s），可能是 WiFi 未连接，继续等待", r.detail)
-                core.write_status(state="网络不可达（未捕获门户参数）", last_error=r.detail)
+                # 连门户参数都拿不到，分两种情形，都不能触发登录：
+                #   reachable=False → 全部探针超时/连接失败（WiFi 没连上、DNS 挂了）
+                #   reachable=True  → 网络通但探针没给出可判定结论（少见）
+                if not r.reachable:
+                    state_text = "网络不可达（探针全部超时）"
+                    if last_state != "unreachable":
+                        log.info("[网络] 所有探针均超时/不可达（%s），网络还没通，只等待不登录", r.detail)
+                else:
+                    state_text = "网络状态未知（未捕获门户参数）"
+                    if last_state != "unreachable":
+                        log.info("[网络] 网络可达但未能判定联网状态（%s），继续等待", r.detail)
+                core.write_status(state=state_text, last_error=r.detail)
                 last_state = "unreachable"
             else:
                 if now > login_ok_until:
@@ -241,9 +277,12 @@ def main_loop():
                     if success:
                         login_ok_until = now + 60
                         last_state = "online"
+                        heartbeat_at = now
+                    else:
+                        last_state = "offline"
                 else:
                     log.debug("[网络] 登录冷却期内，跳过本轮（60秒防重复）")
-                last_state = "offline"
+                    last_state = "offline"
 
             time.sleep(interval)
     except KeyboardInterrupt:
@@ -271,8 +310,12 @@ def run_once():
     elif r.query_string:
         attempt_login(cfg, r.query_string, r.portal_base or cfg.get("portal_base", ""), reason="单次测试")
     else:
-        log.warning("[单次模式] 未联网且未捕获门户参数：%s", r.detail)
-        core.write_status(state="网络不可达（未捕获门户参数）", last_error=r.detail)
+        if not r.reachable:
+            log.warning("[单次模式] 所有探针均超时/不可达，未联网也不尝试登录：%s", r.detail)
+            core.write_status(state="网络不可达（探针全部超时）", last_error=r.detail)
+        else:
+            log.warning("[单次模式] 网络可达但未捕获门户参数，不尝试登录：%s", r.detail)
+            core.write_status(state="网络状态未知（未捕获门户参数）", last_error=r.detail)
 
 
 if __name__ == "__main__":

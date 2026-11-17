@@ -74,6 +74,9 @@ class MonitorWorker(appContext: Context, params: WorkerParameters) :
             if (cfg.notifyOnFailure) {
                 AutoLoginService.postNotice(ctx, "自动登录异常：${ErrorText.of(t)}")
             }
+            // 闸门在 :51 已占用：retry 会立刻重跑，不释放就会在 5 秒内被挡回 success，
+            // 这一轮登录机会被静默丢掉。异常路径确实持有闸门，释放是安全的。
+            AutoLoginGate.release()
             Result.retry()
         }
     }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.campus.autologin"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.0.3"
+        versionCode = 4
+        versionName = "1.0.4"
     }
 
     // 从项目根目录 keystore.properties 读取发布签名（本地 / CI 通用）。
@@ -42,8 +42,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // 使用上面的发布签名，构建出的是「已签名 release」，而非 debug 包
-            signingConfig = signingConfigs.getByName("release")
+            // 有发布签名就用它，构建出「已签名 release」；没有就跳过，
+            // 让 AGP 产出 app-release-unsigned.apk 而不是抛 storeFile 缺失这种难懂的错。
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile != null) {
+                signingConfig = releaseSigning
+            } else {
+                logger.warn("WARNING: 未找到 keystore.properties，release 包未签名（app-release-unsigned.apk）。")
+            }
         }
     }
 

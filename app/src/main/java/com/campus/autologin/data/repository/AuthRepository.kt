@@ -43,18 +43,6 @@ class AuthRepository(context: Context) {
         else prefs.clearPassword()
     }
 
-    /** 环境诊断串（WiFi / 联网校验 / 移动数据），失败提示里回显。 */
-    fun diagnostics(): String = WifiNet.describe(ctx)
-
-    /** WiFi 与移动数据是否同时在线。 */
-    fun isDualNetwork(): Boolean = WifiNet.isDualNetwork(ctx)
-
-    /** 当前会话的门户地址（供"浏览器登录"按钮直接打开，比打 baidu 更准）。 */
-    suspend fun portalUrl(): String? = withContext(Dispatchers.IO) {
-        val net = WifiNet.wifi(ctx)
-        (runCatching { NetworkProbe.detect(net) }.getOrNull() as? ProbeOutcome.Portal)?.url
-    }
-
     // ------------------------------------------------------------------
     // 登录
     // ------------------------------------------------------------------

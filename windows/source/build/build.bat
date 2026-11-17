@@ -1,31 +1,31 @@
 @echo off
 rem ============================================================
-rem 校园网自动登录 Windows 安装包构建脚本  (v1.2.0)
+rem 校园网自动登录 Windows 安装包构建脚本  (v1.2.2)
 rem ------------------------------------------------------------
 rem 用法：在文件资源管理器里双击本脚本，或在 build 目录执行 build.bat
 rem 前提：
 rem   1) 已安装 Python 且能找到 pyinstaller 命令（或自行修改下方 PYI）
-rem   2) 已安装 Inno Setup，ISCC.exe 位于 D:\inno\ISCC.exe
-rem      （若路径不同，修改下方 ISCC 变量即可）
+rem   2) 已安装 Inno Setup（自动探测 D:\inno、D:\Software\Inno Setup 6、
+rem      Program Files (x86)\Inno Setup 6 与 PATH；也可在下方 ISCC 变量写死）
 rem
 rem 产物：
-rem   build\..\output\Setup_校园网自动登录_v1.2.0.exe
-rem   ..\release\Autologin_v1.2.0_x64_setup.exe
+rem   build\..\output\Setup_校园网自动登录_v1.2.2.exe
+rem   ..\..\..\release\Autologin_v1.2.2_x64_setup.exe
 rem ============================================================
 setlocal
 
 rem ---- 路径（基于本脚本所在目录，可随意移动） ----
 set "BUILDIR=%~dp0"
 set "SRCIR=%BUILDIR%.."
-set "RELDIR=%SRCIR%\..\release"
-set "APPVER=1.2.1"
+set "RELDIR=%BUILDIR%..\..\..\release"
+set "APPVER=1.2.2"
 
 rem ---- 1) 定位 PyInstaller ----
 where pyinstaller >nul 2>nul
 if %errorlevel%==0 (
   set "PYI=pyinstaller"
-) else if exist "%SRCIR%\..\tools\venv\Scripts\pyinstaller.exe" (
-  set "PYI=%SRCIR%\..\tools\venv\Scripts\pyinstaller.exe"
+) else if exist "%SRCIR%\..\..\tools\venv\Scripts\pyinstaller.exe" (
+  set "PYI=%SRCIR%\..\..\tools\venv\Scripts\pyinstaller.exe"
 ) else (
   echo [错误] 找不到 pyinstaller，请先安装，或在上方 PYI 变量指定其完整路径。
   pause & exit /b 1
@@ -53,6 +53,8 @@ copy /y "..\使用说明.txt" stage\
 rem ---- 5) Inno Setup 生成安装包 ----
 set "ISCC="
 if exist "D:\inno\ISCC.exe" set "ISCC=D:\inno\ISCC.exe"
+if not defined ISCC if exist "D:\Software\Inno Setup 6\ISCC.exe" set "ISCC=D:\Software\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
 if not defined ISCC ( where ISCC >nul 2>nul && set "ISCC=ISCC" )
 if not defined ISCC (
   echo [错误] 找不到 ISCC.exe，请安装 Inno Setup（默认在 D:\inno\ISCC.exe），

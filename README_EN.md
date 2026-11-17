@@ -9,14 +9,14 @@
 
 ## Download
 
-Installers are in [`release/`](release/):
+Installers are published on the [**Releases page**](https://github.com/Zelm05/campus-autologin/releases/latest):
 
 | Platform | File | Notes |
 | --- | --- | --- |
-| Android | `release/Autologin-v1.0.3_release.apk` | Install directly; overwrite keeps your credentials. Older v1.0.1 is kept in this folder |
-| Windows | `release/Autologin_v1.2.0_x64_setup.exe` | No admin required; in-place upgrade supported. Starting the background service also enables auto-run after login; optional "Turbo Start" runs at boot, even on the lock screen |
+| Android | `Autologin-<version>_release.apk` | Install directly; overwriting keeps your credentials |
+| Windows | `Autologin_<version>_x64_setup.exe` | No admin required; in-place upgrade supported. Starting the background service also enables auto-run after login; optional "Turbo Start" runs at boot, even on the lock screen |
 
-> New Android APKs are also built automatically via GitHub Actions: push a `v*` tag to get a signed APK from the Release page.
+> Installers are large, so they are not committed — `release/` is excluded in `.gitignore` and only published as Release assets. Android APKs are built automatically by GitHub Actions on every `v*` tag.
 
 ## ⚠️ Important — enable auto-start
 
@@ -43,7 +43,7 @@ campus-autologin/
 │       ├── app.py · campus_core.py · daemon.py · gui.py   # runtime files (config.json etc.) are not committed
 │       ├── requirements.txt · README.md · 使用说明.txt · 启动设置.bat
 │       └── build/          # packaging: CampusLogin.spec · icon.ico · setup.iss · build.bat · version_info.txt
-├── release/                # downloadable installers (APK / EXE)
+├── release/                # local build output (not committed; see the Releases page)
 ├── screenshots/            # UI screenshots for the README
 ├── build.gradle.kts        # root build script
 ├── settings.gradle.kts     # Gradle settings

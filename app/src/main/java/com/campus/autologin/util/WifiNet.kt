@@ -47,8 +47,6 @@ object WifiNet {
         }
     }
 
-    fun isDualNetwork(ctx: Context): Boolean = wifi(ctx) != null && hasCellular(ctx)
-
     /**
      * 系统是否认为这条 WiFi 已经"能上网"。
      * 未认证的校园 WiFi 拿不到 NET_CAPABILITY_VALIDATED —— 这是**最可靠**的

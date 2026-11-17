@@ -1,5 +1,19 @@
 # 更新日志 Changelog
 
+## v1.2.2 · Windows (2026-11-17)
+- 修复守护进程状态机：登录成功后补写心跳时间，「已联网」不再每次登录后多打一条
+  冗余日志，联网/离线状态记录不再被下一轮误判覆盖
+- 修复 GUI 日志面板跨零点变空：当天日志不存在时自动回退到最近一份 `daemon-*.log`，
+  标题栏显示文件名与大小
+- 版本号对齐 1.2.2（程序、安装包、文档一致）
+
+## v1.0.4 · Android (2026-11-17)
+- 修复「开机自启动后台监控」开关无效：开机拉起判定统一到 `KeepAlive.shouldRun`，
+  开机广播（BOOT_COMPLETED / QUICKBOOT_POWERON）与升级重启分别按
+  `autoStartOnBoot` / `autoLogin||alwaysRunInBackground` 决定是否启动服务
+- 修复权限回调签名与 AndroidX ComponentActivity 不一致导致的编译失败
+- release 构建在缺少签名配置时回退为未签名产物，不再直接构建失败
+
 ## v1.2.1 · Windows (2026-09-14)
 - 修复双实例互抢 `status.json` 导致守护进程崩溃（WinError 5 弹窗）的问题：
   - 单实例保护新增**全局命名互斥体**（Global 命名空间，跨会话/跨权限级可靠）——

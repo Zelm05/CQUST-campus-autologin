@@ -192,12 +192,49 @@ def set_boot_task(enable):
 # ----------------------------------------------------------------------
 # API 实现
 # ----------------------------------------------------------------------
+# 状态快照缓存（仅供 api_status 使用，避免每 5 秒起一次 netsh/schtasks）
+# 前端每 5 秒轮询一次 /api/status。其中两个字段很慢：
+#   get_connected_ssid() → subprocess 调 netsh（实测 258–1122 ms）
+#   boot_task_enabled()  → 文件缺失时回退 schtasks（实测 ~192 ms）
+# 合计让 api_status 单次耗时 442–602 ms，纯属每 5 秒一次的浪费。
+# 这里只缓存这两个慢字段（用 time.monotonic 记时，不受系统时钟调整影响）；
+# daemon_running / autostart / read_status 几乎零成本，保持实时——用户点完按钮必须
+# 立刻看到变化。
+# TTL 必须明显大于前端轮询间隔（下方 setInterval 5 秒）：两者相等时每次轮询缓存
+# 恰好刚过期，等于完全没缓存。15 秒 = 三次轮询里只起一次子进程，SSID 最旧 15 秒。
+_STATUS_SLOW_TTL = 15.0
+_status_slow_cache = {"at": None, "ssid": "", "boot_task": False}
+_status_slow_lock = threading.Lock()
+
+
+def _slow_status():
+    """返回 (cur_ssid, boot_task)，命中 TTL 内的缓存时不再起子进程。"""
+    now = time.monotonic()
+    with _status_slow_lock:
+        at = _status_slow_cache["at"]
+        if at is not None and now - at < _STATUS_SLOW_TTL:
+            return _status_slow_cache["ssid"], _status_slow_cache["boot_task"]
+    ssid = core.get_connected_ssid()
+    boot_task = boot_task_enabled()
+    with _status_slow_lock:
+        _status_slow_cache["at"] = now
+        _status_slow_cache["ssid"] = ssid
+        _status_slow_cache["boot_task"] = boot_task
+    return ssid, boot_task
+
+
+def invalidate_status_cache():
+    """清空状态快照缓存：任何改变 ssid/开机自启状态的操作后都必须调用。"""
+    with _status_slow_lock:
+        _status_slow_cache["at"] = None
+
+
 def api_status():
     cfg = core.load_config()
     st = core.read_status()
     username = cfg.get("username", "")
     campus_ssid = cfg.get("campus_ssid", "").strip()
-    cur_ssid = core.get_connected_ssid()
+    cur_ssid, boot_task = _slow_status()
     wifi_status = "off"  # off / wrong / right / unknown
     if cur_ssid:
         if campus_ssid and cur_ssid == campus_ssid:
@@ -216,7 +253,7 @@ def api_status():
         "login_count": st.get("login_count", 0),
         "daemon_running": core.is_daemon_running(),
         "autostart": autostart_enabled(),
-        "boot_task": boot_task_enabled(),   # 开机级自启（开机即启动、锁屏也运行）
+        "boot_task": boot_task,             # 开机级自启（开机即启动、锁屏也运行）
         "is_admin": core.is_admin(),        # 前端据此决定是否需要提示 UAC
         "username": username,
         "username_masked": core.mask_username(username),
@@ -248,6 +285,9 @@ def api_save(data):
     if "campus_ssid" in data:
         cfg["campus_ssid"] = str(data.get("campus_ssid", "")).strip()
     core.save_config(cfg)
+    # 保存后立即失效状态缓存：campus_ssid 变了，前端下一次 /api/status 必须拿到
+    # 重新采集的 WiFi 状态，而不是 TTL 内的旧快照
+    invalidate_status_cache()
     log.info("设置已保存：用户名=%s 服务=%s 间隔=%ss 校园网SSID=%s",
              cfg["username"], cfg["service"], cfg["interval"], cfg.get("campus_ssid", ""))
     return {"ok": True}
@@ -270,7 +310,9 @@ def api_test():
         result["message"] = "当前已联网，无需登录。如需测试完整流程：断开 WiFi 重连（或在自助服务页下线本机）后再点测试。"
         return result
     if not r.query_string:
-        result["message"] = "未联网且未捕获到门户跳转（WiFi 可能未连接）。"
+        result["message"] = ("探针全部超时/不可达（WiFi 可能未连接或 DNS 异常），未尝试登录。"
+                             if not r.reachable else
+                             "网络可达但未捕获到门户跳转，未能判定联网状态，未尝试登录。")
         return result
     if not username or not password:
         result["message"] = "请先填写并保存用户名、密码，再测试登录。"
@@ -295,13 +337,31 @@ def api_test():
     return result
 
 
+def _latest_daemon_log():
+    """取最新的 daemon-日期.log。
+
+    守护进程在启动时就把日志文件句柄固定住了，跨零点后仍在写「昨天」那个文件；
+    另外跨零点后「今天」的文件可能还不存在。两种情况都只查今天会读空，
+    所以找不到今天就读最近的一份。
+    """
+    today = os.path.join(core.LOG_DIR, "daemon-%s.log" % datetime.now().strftime("%Y-%m-%d"))
+    if os.path.exists(today):
+        return today
+    try:
+        cands = [os.path.join(core.LOG_DIR, n) for n in os.listdir(core.LOG_DIR)
+                 if n.startswith("daemon-") and n.endswith(".log")]
+    except OSError:
+        return None
+    return max(cands, key=os.path.getmtime) if cands else None
+
+
 def api_log():
-    logfile = os.path.join(core.LOG_DIR, "daemon-%s.log" % datetime.now().strftime("%Y-%m-%d"))
-    if not os.path.exists(logfile):
+    logfile = _latest_daemon_log()
+    if not logfile:
         return {"log": ""}
     with open(logfile, "r", encoding="utf-8", errors="replace") as f:
         lines = f.readlines()
-    return {"log": "".join(lines[-150:])}
+    return {"log": "".join(lines[-150:]), "file": os.path.basename(logfile)}
 
 
 # ----------------------------------------------------------------------
@@ -412,6 +472,7 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     log.warning("[后台服务] 创建登录级自启任务失败：%s", a_msg)
                     msg += "（已启动，但设置登录自启失败，详见日志）"
+            invalidate_status_cache()   # daemon_running / autostart 刚变，缓存里的慢字段一并重置
             self._json({"ok": ok, "message": msg})
         elif path == "/api/daemon/stop":
             ok, msg = core.stop_daemon()
@@ -430,6 +491,7 @@ class Handler(BaseHTTPRequestHandler):
             # 停止后台服务的同时，关闭"登录后自动运行"（删除登录级自启任务）
             a_ok, a_msg = core.set_autostart(False)
             tip = "，已关闭登录后自动运行" if a_ok else ("，关闭登录自启失败：%s" % (a_msg or "未知"))
+            invalidate_status_cache()   # 后台服务状态已变，下一次 /api/status 重新采集
             self._json({"ok": ok, "message": msg + tip})
         elif path == "/api/boottask":
             # 开机级自启：开机即启动、锁屏状态下也在后台运行（需管理员授权）
@@ -444,6 +506,9 @@ class Handler(BaseHTTPRequestHandler):
                 boot_task = enable
             else:
                 boot_task = boot_task_enabled()
+            # 开机自启状态刚被改动（且前端随后会立刻轮询 status）→ 必须失效缓存，
+            # 否则 TTL 内仍会显示改动前的 boot_task 旧值
+            invalidate_status_cache()
             self._json({"ok": ok, "message": msg, "boot_task": boot_task})
         elif path == "/api/openlog":
             try:
@@ -766,7 +831,7 @@ PAGE_HTML = r"""<!DOCTYPE html>
 
       <div class="card log">
         <div class="logbar">
-          <span class="l">今日日志 · <span id="logsize">0</span> 条</span>
+          <span class="l"><span id="logfile">今日日志</span> · <span id="logsize">0</span> 条</span>
           <label class="chk"><input type="checkbox" id="auto_log" checked> 自动刷新</label>
         </div>
         <pre class="logpre" id="log">暂无日志</pre>
@@ -849,6 +914,12 @@ function refreshStatus() {
 function refreshLog() {
   api('/api/log').then(d => {
     const el = $('log');
+    if (d.file) {
+      // 跨零点后守护进程仍在写前一天的文件，标题跟着实际读到的文件走，避免"今日日志"名不副实
+      const m = d.file.match(/^daemon-(\d{4}-\d{2}-\d{2})\.log$/);
+      const today = new Date().toLocaleDateString('sv-SE');
+      $('logfile').textContent = !m ? '后台日志' : (m[1] === today ? '今日日志' : m[1] + ' 日志');
+    }
     if (d.log) {
       const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
       el.textContent = d.log;

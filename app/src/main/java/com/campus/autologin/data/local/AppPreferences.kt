@@ -53,12 +53,6 @@ class AppPreferences(context: Context) {
 
     fun clearPassword() = prefs.edit().remove(Const.KEY_PASSWORD).apply()
 
-    // ---- 手动下线冷却（App 内点"下线"后暂停自动补登一段时间） ----
-    fun getManualLogoutAt(): Long = prefs.getLong(Const.KEY_MANUAL_LOGOUT_AT, 0L)
-    fun setManualLogoutAt(time: Long) =
-        prefs.edit().putLong(Const.KEY_MANUAL_LOGOUT_AT, time).apply()
-    fun clearManualLogoutAt() = prefs.edit().remove(Const.KEY_MANUAL_LOGOUT_AT).apply()
-
     // ---- 登录会话信息（供注销 / 状态展示） ----
     fun getUserIndex(): String = prefs.getString(Const.KEY_USER_INDEX, "") ?: ""
     fun setUserIndex(value: String) = prefs.edit().putString(Const.KEY_USER_INDEX, value).apply()

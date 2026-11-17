@@ -481,7 +481,7 @@ private fun InfoCard(info: UserInfo) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             InfoRow("校园", CampusConfig.SCHOOL_NAME.orEmpty().ifBlank { "校园" }, "🏫")
             InfoRow("网关", CampusConfig.GATEWAY.removePrefix("http://").orEmpty(), "📡")
-            InfoRow("本机 IP", s(info.ip).ifBlank { "—" }, "💻", s(info.wlanHex).ifBlank { "" })
+            InfoRow("本机 IP", s(info.ip).ifBlank { "—" }, "💻")
             val macDisplay = s(info.mac).ifBlank { null }
             if (macDisplay != null) InfoRow("MAC 地址", macDisplay, "🔗")
         }

@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 
-APP_VERSION = "1.2.1"   # 应用版本号（显示在设置页脚与 exe 文件属性里）
+APP_VERSION = "1.2.2"   # 应用版本号（显示在设置页脚与 exe 文件属性里）
 APP_NAME = "校园网自动登录"
 
 # 数据目录：源码运行时 = 本文件所在目录；
@@ -52,7 +52,11 @@ DEFAULT_SERVICE = "互联网"
 
 
 # ----------------------------------------------------------------------
-# 配置读写（密码做 base64 混淆存储，防止被随手看到，不是加密）
+# 配置读写
+# 密码只做 base64 可逆编码，不是加密：能读到 config.json 的人一定能还原明文。
+# 这样做只是避免密码以明文出现在文件里被一眼看到。请勿在共享电脑上保存密码，
+# 本机若多人使用，建议每次到设置界面手动填写。（Android 端用 Keystore 加密，
+# 与 Windows 端的安全等级不同，勿混为一谈。）
 # ----------------------------------------------------------------------
 def load_config():
     """读取 config.json，缺失项用默认值补齐"""
@@ -165,8 +169,18 @@ def http_post(url, body, timeout=8):
 # 探测：判断联网状态并捕获门户 queryString
 # ----------------------------------------------------------------------
 class ProbeResult(object):
+    """探测结果。
+
+    online / reachable 是两件不同的事，上层必须分开看：
+      - online=True  → 确认已联网（204 / 跳微软官网 / 百度正常），不需要登录
+      - online=False 且 query_string 非空 → 明确被门户劫持，可以登录
+      - online=False 且 reachable=False → 全部探针超时/不可达（WiFi 没连上、
+        DNS 挂了），此时既不是「在线」也不是「需要登录」，绝不能拿它去触发登录
+    """
+
     def __init__(self):
         self.online = False       # 是否已联网
+        self.reachable = False    # 是否收到过任何 HTTP 响应（False = 全部超时/不可达）
         self.portal_url = ""      # 被劫持时跳转到的门户完整地址
         self.query_string = ""    # 门户地址 '?' 后的参数串（登录必需）
         self.portal_base = ""     # 从门户地址推出的服务器根，如 http://aaa.cqust.edu.cn
@@ -178,6 +192,9 @@ def _probe_once(url, timeout):
     r = ProbeResult()
     code, headers, body, err = http_get_no_redirect(url, timeout)
     r.detail = "%s -> HTTP %s" % (urllib.parse.urlsplit(url).netloc, code if code else ("异常 %s" % err))
+    # 只要拿到了 HTTP 状态码（含 302/200/404 等）就说明网络是通的，只是还没判定出结果；
+    # code 为 None 表示连接失败/超时/DNS 失败 —— 那才是真正的「不可达」。
+    r.reachable = code is not None
 
     if code == 204:
         r.online = True
@@ -222,11 +239,15 @@ def _probe_once(url, timeout):
 
 
 def probe(probe_url=None, timeout=6):
-    """按探针链依次探测网络，返回 ProbeResult。
-    - 任一探针 204 / 正常跳微软 / 百度正常 → 已联网
+    """按探针链依次探测网络，返回 ProbeResult。语义与 Android 端 NetworkProbe 对齐：
+    - 「已联网」需要两个探针交叉确认（或同一探针复测一次确认），避免单个探针
+      偶发 204 就把网关劫持误判成正常
     - 任一探针 302 跳到非微软地址 → 未认证，Location 即门户地址（含 queryString）
-    - 全部失败 → 网络不可达（WiFi 断开等），不尝试登录
+    - 全部超时/连接失败 → online=False 且 reachable=False，上层只记日志、不登录
     probe_url 参数兼容旧调用（字符串或列表均可）
+
+    耗时：交叉确认只在探测到「在线」时才多发一次请求（204 通常几十毫秒返回），
+    掉线/不可达路径与原来一致，不会拉长守护循环。
     """
     if isinstance(probe_url, str):
         urls = [probe_url]
@@ -239,16 +260,47 @@ def probe(probe_url=None, timeout=6):
 
     final = ProbeResult()
     final.detail = ""
+    pending = None       # 首个报告「在线」的探针结果，等第二次确认
+    pending_url = ""
+    any_reachable = False
+
+    def _add(detail):
+        final.detail = (final.detail + "；" + detail) if final.detail else detail
+
     for u in urls:
         r = _probe_once(u, timeout)
+        any_reachable = any_reachable or r.reachable
         if r.online is True:
-            return r
+            if pending is not None:
+                # 第二个探针也确认在线 → 交叉确认通过
+                r.detail = final.detail + "；" + r.detail + "（两个探针交叉确认为已联网）"
+                r.reachable = True
+                return r
+            pending, pending_url = r, u
+            _add(r.detail)
+            continue
         if r.online is False and r.query_string:
-            return r  # 明确检测到门户，直接返回用于登录
-        if final.detail:
-            final.detail += "；"
-        final.detail += r.detail
+            return r  # 明确检测到门户，直接返回用于登录（无需再确认）
+        _add(r.detail)
+
+    if pending is not None:
+        # 探针链里没有别的探针（或其余探针都无法判定）→ 用同一地址复测一次做交叉确认
+        r2 = _probe_once(pending_url, timeout)
+        if r2.online is True:
+            r2.detail = final.detail + "；" + r2.detail + "（同址复测确认为已联网）"
+            r2.reachable = True
+            return r2
+        if r2.online is False and r2.query_string:
+            return r2   # 复测拿到了门户地址 → 按「未认证」处理
+        # 复测超时/不可达：204 是权威的「未被劫持」信号，超时是模糊信号，
+        # 此时仍判在线（否则真能上网的机器会被刷成「网络不可达」）；
+        # detail 里如实标注只拿到一次确认，便于排查。
+        pending.detail = final.detail + "（仅单探针确认，复测未响应）"
+        pending.reachable = True
+        return pending
+
     final.online = False
+    final.reachable = any_reachable
     return final
 
 

@@ -1,6 +1,7 @@
 package com.campus.autologin.service
 
 import android.content.Context
+import com.campus.autologin.data.model.LoginConfig
 import com.campus.autologin.data.repository.AuthRepository
 
 /**
@@ -12,16 +13,23 @@ import com.campus.autologin.data.repository.AuthRepository
  */
 object KeepAlive {
 
-    /** 后台监控是否应当处于开启状态。 */
-    fun shouldRun(ctx: Context): Boolean {
-        val cfg = runCatching { AuthRepository(ctx.applicationContext).loadConfig() }
-            .getOrNull() ?: return false
-        return cfg.autoLogin || cfg.alwaysRunInBackground
+    /**
+     * 后台监控是否应当处于开启状态。
+     *
+     * 两个入口语义不同，必须分开判：
+     *  - booting=true（开机广播）：用户关掉「开机自启动后台监控」就不许拉起；
+     *  - booting=false（打开 App / 保存设置 / 更新包）：用户主动进来了，按监控开关走。
+     */
+    fun shouldRun(cfg: LoginConfig, booting: Boolean): Boolean {
+        if (!(cfg.autoLogin || cfg.alwaysRunInBackground)) return false
+        return !booting || cfg.autoStartOnBoot
     }
 
-    fun sync(ctx: Context) {
+    fun sync(ctx: Context, booting: Boolean = false) {
         val app = ctx.applicationContext
-        if (shouldRun(app)) {
+        val cfg = runCatching { AuthRepository(app).loadConfig() }.getOrNull()
+        // 配置读不出来时按"不开启"处理（与原行为一致），避免残留服务无人回收
+        if (cfg != null && shouldRun(cfg, booting)) {
             MonitorWorker.enable(app)
             AutoLoginService.start(app)
         } else {

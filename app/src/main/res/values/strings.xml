@@ -2,4 +2,9 @@
     <string name="app_name">校园网自动登录</string>
     <string name="notification_channel_id">auto_login_channel</string>
     <string name="notification_channel_name">自动登录服务</string>
+
+    <!-- 通知权限被拒（Android 13+）时的引导 -->
+    <string name="notification_permission_denied_title">通知权限未开启</string>
+    <string name="notification_permission_denied_message">监控运行时靠通知栏提示状态。没有通知权限，服务仍在后台运行，但你看不到任何提示，也容易误以为它没在监控。建议到系统设置里打开本应用的通知权限。</string>
+    <string name="notification_permission_denied_action">去设置</string>
 </resources>
